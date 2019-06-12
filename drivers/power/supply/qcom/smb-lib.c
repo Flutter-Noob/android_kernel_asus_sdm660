@@ -74,16 +74,8 @@ static struct alarm bat_alarm;
 /* Huaqin add for ZQL1650-68 systme suspend 1 min run sw jeita by fangaijun at 2018/02/06 end */
 /* Huaqin modify for ZQL1650-70 Identify Adapter ID by fangaijun at 2018/02/8 start */
 extern struct gpio_control *global_gpio;	//global gpio_control
-static int ASUS_ADAPTER_ID = 0;
-/* Huaqin modify for ZQL1650-70 Identify Adapter ID by fangaijun at 2018/02/8 end */
-//Huaqin added by tangqingyong at 20180206 for USB alert start
-#define CHG_ALERT_HOT_NTC_VOLTAFE 237229 //70degC
-#define CHG_ALERT_WARM_NTC_VOLTAGE 320588 //60degC
-#define        THM_ALERT_NONE          0 //temp good
-#define        THM_ALERT_NO_AC         1 //temp hot with otg
-#define        THM_ALERT_WITH_AC       2 //temp hot with AC
+static int ASUS_ADAPTER_ID;
 extern struct switch_dev usb_alert_dev;
-static bool usb_alert_usb_otg_disable=false;
 static bool need_replugin_usb=false;
 static bool usb_otg_present=false;
  /* Huaqin modify for ZQL1820-973 by limengxia at 2018/10/19 start */
@@ -110,6 +102,8 @@ int asus_get_prop_batt_volt(struct smb_charger *chg);
 int asus_get_prop_batt_capacity(struct smb_charger *chg);
 int asus_get_prop_batt_health(struct smb_charger *chg);
 int asus_get_prop_usb_present(struct smb_charger *chg);
+int flag_repeat = 0;
+
 enum ADAPTER_ID {
 	NONE = 0,
 	ASUS_750K,
@@ -118,16 +112,7 @@ enum ADAPTER_ID {
 	OTHERS,
 	ADC_NOT_READY,
 };
-/* Huaqin modify for ZQL1650-70 Identify Adapter ID by fangaijun at 2018/02/8 start */
-static char *asus_id[] = {
-	"NONE",
-	"ASUS_750K",
-	"ASUS_200K",
-	"PB",
-	"OTHERS",
-	"ADC_NOT_READY"
-};
-/* Huaqin modify for ZQL1650-70 Identify Adapter ID by fangaijun at 2018/02/8 end */
+
 char *health_type[] = {
 	"GOOD",
 	"COLD",
@@ -867,9 +852,6 @@ static void smblib_uusb_removal(struct smb_charger *chg)
 #endif
 	alarm_cancel(&bat_alarm);
 	asus_flow_processing = 0;
-/* Huaqin modify for ZQL1650-70 Identify Adapter ID by fangaijun at 2018/02/8 start */
-	ASUS_ADAPTER_ID = 0;
-/* Huaqin modify for ZQL1650-70 Identify Adapter ID by fangaijun at 2018/02/8 start */
 //Huaqin added by tangqingyong at 20180206 for USB alert start
 	need_replugin_usb=true;
 //Huaqin added by tangqingyong at 20180206 for USB alert end
@@ -1425,6 +1407,7 @@ static int _smblib_vconn_regulator_enable(struct regulator_dev *rdev)
 				 VCONN_EN_VALUE_BIT | val);
 	if (rc < 0) {
 		smblib_err(chg, "Couldn't enable vconn setting rc=%d\n", rc);
+                printk("vconn failed\n");
 		return rc;
 	}
 
@@ -1550,6 +1533,7 @@ static int smblib_enable_otg_wa(struct smb_charger *chg)
 		if (retry_count >= MAX_RETRY) {
 			smblib_dbg(chg, PR_OTG, "OTG enable failed with %duA\n",
 								otg_current[i]);
+			printk("Otg Failed\n");
 			rc = smblib_write(chg, CMD_OTG_REG, 0);
 			if (rc < 0) {
 				smblib_err(chg, "disable OTG rc=%d\n", rc);
@@ -3473,7 +3457,7 @@ void asus_batt_RTC_work(struct work_struct *dat)
 	new_batAlarm_time.tv_sec = 0;
 	new_batAlarm_time.tv_nsec = 0;
 
-	RTCSetInterval = 60;
+	RTCSetInterval = 10800;
 
 	new_batAlarm_time.tv_sec = mtNow.tv_sec + RTCSetInterval;
 	printk("[BAT][CHG] %s: alarm start after %ds\n", __FUNCTION__, RTCSetInterval);
@@ -3495,6 +3479,7 @@ void asus_batt_RTC_work(struct work_struct *dat)
 #define ICL_1500mA	0x3C
 #define ICL_1900mA	0x4C
 #define ICL_2000mA	0x50
+#define ICL_2500mA	0x64
 #define ICL_2850mA	0x72
 #define ICL_3000mA	0x78
 #define ASUS_MONITOR_CYCLE		60000
@@ -3540,6 +3525,8 @@ void smblib_asus_monitor_start(struct smb_charger *chg, int time)
 #define SMBCHG_FAST_CHG_CURRENT_VALUE_1500MA 	0x3C
 #define SMBCHG_FAST_CHG_CURRENT_VALUE_2000MA 	0x50
 #define SMBCHG_FAST_CHG_CURRENT_VALUE_2050MA 	0x52
+#define SMBCHG_FAST_CHG_CURRENT_VALUE_2500MA	0x64
+#define SMBCHG_FAST_CHG_CURRENT_VALUE_2850MA	0x72
 #define SMBCHG_FAST_CHG_CURRENT_VALUE_3000MA 	0x78
 
 /* Huaqin modify for ZQL1820-HQ000002  Adjust JEITA according to customer require by gaochao at 2018/10/11 start */
@@ -3625,7 +3612,7 @@ int smbchg_jeita_judge_state(int old_State, int batt_tempr)
 		result_State = JEITA_STATE_RANGE_100_to_500;
 	//50 <= batt_tempr < 60
 	} else if (batt_tempr < 600) {
-		result_State = JEITA_STATE_RANGE_500_to_600;
+		result_State = JEITA_STATE_RANGE_100_to_500;
 	//60 <= batt_tempr
 	} else{
 		result_State = JEITA_STATE_LARGER_THAN_600;
@@ -3746,41 +3733,6 @@ void asus_update_usb_connector_state(struct smb_charger *chip)
 		printk("NONE gpio12_vadc_dev \n");
 		return;
 	}
-
-	if(phy_volta  < CHG_ALERT_HOT_NTC_VOLTAFE){
-		if (!usb_otg_present){
-			switch_set_state(&usb_alert_dev, THM_ALERT_WITH_AC);
-			smblib_set_usb_suspend(chip, 1);
-		}else
-			switch_set_state(&usb_alert_dev, THM_ALERT_NO_AC);
-
-		usb_alert_usb_otg_disable=true;
-		need_replugin_usb=false;
-		rc = smblib_masked_write(chip, CMD_OTG_REG, OTG_EN_BIT, 0);
-//Huaqin added by tangqingyong at 20180212 for usb_otg start
-		switch_set_state(&usb_otg_dev,0);
-//Huaqin added by tangqingyong at 20180212 for usb_otg end
-		if (rc < 0)
-			dev_err(chip->dev, "Couldn't set CMD_OTG_REG rc=%d\n", rc);
-		printk("USB connector hot, suspend charger and otg \n");
-
-	}else if((phy_volta >= CHG_ALERT_HOT_NTC_VOLTAFE) && (phy_volta <= CHG_ALERT_WARM_NTC_VOLTAGE)){
-		if(usb_alert_usb_otg_disable == true){
-			printk("USB alert former state is hot, now is warm\n");
-		}else
-			printk("USB alert former state is GOOD, now is warm");
-
-	}else if((phy_volta > CHG_ALERT_WARM_NTC_VOLTAGE) && need_replugin_usb){
-		switch_set_state(&usb_alert_dev, THM_ALERT_NONE);
-		usb_alert_usb_otg_disable=false;
-		need_replugin_usb=false;
-		rc = smblib_set_usb_suspend(chip, 0);
-		if (rc < 0)
-			dev_err(chip->dev, "Couldn't set CMD_OTG_REG rc=%d\n", rc);
-		printk("USB connector temp is GOOD, recover charge \n");
-
-	}
-
 }
 //Huaqin added by tangqingyong at 20180206 for USB alert end
 void jeita_rule(void)
@@ -3839,14 +3791,17 @@ void jeita_rule(void)
 	bat_volt = asus_get_prop_batt_volt(smbchg_dev);
 	bat_capacity = asus_get_prop_batt_capacity(smbchg_dev);
 	state = smbchg_jeita_judge_state(state, bat_temp);
-	printk("%s: state=%d,batt_health = %s, bat_temp = %d, bat_volt = %d, bat_capacity=%d,ICL = 0x%x, FV_reg=0x%x, Countrycode %d\n",
-		__func__,state, health_type[bat_health], bat_temp, bat_volt,bat_capacity, ICL_reg, FV_reg,BR_countrycode);
+	printk("%s: state=%d,batt_health = %s, bat_temp = %d, bat_volt = %d, bat_capacity=%d,ICL = 0x%x, FV_reg=0x%x\n",
+		__func__,state, health_type[bat_health], bat_temp, bat_volt,bat_capacity, ICL_reg, FV_reg);
+	printk("%s: state=%d,batt_health = %s, bat_temp = %d, bat_volt = %d, bat_capacity=%d,ICL = 0x%x, FV_reg=0x%x\n",
+		__func__, state, health_type[bat_health], bat_temp, bat_volt,
+		bat_capacity, ICL_reg, FV_reg);
 
 	switch (state) {
 	case JEITA_STATE_LESS_THAN_0:
 		charging_enable = EN_BAT_CHG_EN_COMMAND_FALSE;
 		FV_CFG_reg_value = SMBCHG_FLOAT_VOLTAGE_VALUE_4P357;
-		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_850MA;
+		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_1400MA;
 		printk("%s: temperature < 0\n", __func__);
 		break;
 	case JEITA_STATE_RANGE_0_to_100:
@@ -3856,7 +3811,7 @@ void jeita_rule(void)
 		FV_CFG_reg_value = SMBCHG_FLOAT_VOLTAGE_VALUE_4P350;                   //reg=1070
 		/* Huaqin modify for ZQL1820-711 Set FCC as 925mA while battery temperature between 0 degree and 10 degree by gaochao at 2018/09/20 start */
 		//FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_1400MA;                //reg=1061
-		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_925MA;		//FCC < 1000mA  10% accuracy
+		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_2000MA;		//FCC < 1000mA  10% accuracy
 		/* Huaqin modify for ZQL1820-711 Set FCC as 925mA while battery temperature between 0 degree and 10 degree by gaochao at 2018/09/20 end */
 		printk("%s: 0 <= temperature < 10\n", __func__);
 		rc = SW_recharge(smbchg_dev);
@@ -3871,7 +3826,7 @@ void jeita_rule(void)
 		//FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_1475MA;
 		FV_CFG_reg_value = SMBCHG_FLOAT_VOLTAGE_VALUE_4P350;                   //reg=1070
 		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_2000MA;             //reg=1061
-		printk("%s: 10 <= temperature < 20\n", __func__);
+                printk("%s: 10 <= temperature < 20\n", __func__);
 		rc = SW_recharge(smbchg_dev);
 		if (rc < 0) {
 			printk("%s: SW_recharge failed rc = %d\n", __func__, rc);
@@ -3887,8 +3842,10 @@ void jeita_rule(void)
 			FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_1500MA;
 		}
 		FV_CFG_reg_value = SMBCHG_FLOAT_VOLTAGE_VALUE_4P350;
-		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_2000MA;
-		printk("%s: 20 <= temperature < 50\n", __func__);
+       		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_3000MA;
+
+		printk("%s: FCC_reg_value = 0x%x",
+			__func__,FCC_reg_value);
 		rc = SW_recharge(smbchg_dev);
 		if (rc < 0) {
 			printk("%s: SW_recharge failed rc = %d\n", __func__, rc);
@@ -3944,7 +3901,7 @@ void jeita_rule(void)
 		/* Huaqin modify for ZQL1820-1219 Set FV as 4095mV at factory mode to reduce charging time by gaochao at 2018/11/13 end */
 		/* Huaqin modify for ZQL1820-HQ000003  Set FCC as 2050mA to decrease charging time by gaochao at 2018/10/23 start */
 		//FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_2000MA;
-		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_2050MA;
+		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_2500MA;
 		/* Huaqin modify for ZQL1820-HQ000003  Set FCC as 2050mA to decrease charging time by gaochao at 2018/10/23 end */
 		printk("%s: 45 <= temperature < 55\n", __func__);
 		break;
@@ -3958,7 +3915,7 @@ void jeita_rule(void)
 
 		charging_enable = EN_BAT_CHG_EN_COMMAND_FALSE;
 		FV_CFG_reg_value = SMBCHG_FLOAT_VOLTAGE_VALUE_4P004;
-		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_1475MA;
+		FCC_reg_value = SMBCHG_FAST_CHG_CURRENT_VALUE_1500MA;
 		printk("%s: temperature >= 55\n", __func__);
 		break;
 	}
@@ -3977,12 +3934,11 @@ void jeita_rule(void)
 				smblib_set_usb_suspend(smbchg_dev, true);
 				printk("demo_app stop usb charging  ---");
 			}
-			else if(!usb_alert_usb_otg_disable){
+		        {
 //Huaqin add for ZQL1650-26 by diganyun at 2018/02/11 when usb alert do not resume usb
 				smblib_set_usb_suspend(smbchg_dev, false);
 				printk("demo_app resume usb charging  ---");
 				}
-			else;
 
 			if(demo_chg_status == DEMO_CHG_THD)
 				demo_stop_charging_flag = false;
@@ -4265,6 +4221,8 @@ void asus_chg_flow_work(struct work_struct *work)
 		break;
 	}
 }
+
+// Getting charger ID Here
 extern int32_t get_ID_vadc_voltage(void);
 static void CHG_TYPE_judge(struct smb_charger *chg)
 {
@@ -4280,6 +4238,8 @@ static void CHG_TYPE_judge(struct smb_charger *chg)
 	// read charger ID via pm660 gpio3
 	adc_result = get_ID_vadc_voltage();
 
+        if(flag_repeat == 0)
+   {
 	if (adc_result <= VADC_THD_300MV) {                                                      //vdm1 < 0.3v
 		printk("CHG_TYPE_judge adc_result1=%d\n",adc_result);
 		ret = gpio_direction_output(global_gpio->ADCPWREN_PMI_GP1, 1);
@@ -4290,25 +4250,45 @@ static void CHG_TYPE_judge(struct smb_charger *chg)
 		}
 		msleep(500);
 
+        if(flag_repeat == 0)
+		/* vdm2 > 1v */
 		adc_result = get_ID_vadc_voltage();
 		printk("CHG_TYPE_judge adc_result2=%d\n",adc_result);
 		if (adc_result >= VADC_THD_1000MV) {                                           //vdm2 > 1v
-			ASUS_ADAPTER_ID = OTHERS;
+			{ ASUS_ADAPTER_ID = OTHERS;
+			  flag_repeat = 1;
+			}
 		} else {
-			if (adc_result >= MIN_750K && adc_result <= MAX_750K)           //0.675 < adc_result < 0.851
+			/* 0.675 < adc_result < 0.851 */         //For asus only
+			if (adc_result >= MIN_750K && adc_result <= MAX_750K) {           //0.675 < adc_result < 0.851
 				ASUS_ADAPTER_ID = ASUS_750K;
-			else if (adc_result >= MIN_200K && adc_result <= MAX_200K)    //0.306 < adc_result <  0.406
+                                flag_repeat = 1;
+			/* 0.306 < adc_result <  0.406 */
+			} else if (adc_result >= MIN_200K &&
+					adc_result <= MAX_200K){
 				ASUS_ADAPTER_ID = ASUS_200K;
-			else
-				ASUS_ADAPTER_ID = OTHERS;
-		}
+                                flag_repeat = 1;
+			}
+                }
+	/* vdm1 */
 	} else {                                                //vdm1
 		if (adc_result >= VADC_THD_900MV)
 			ASUS_ADAPTER_ID = PB;
 		else
 			ASUS_ADAPTER_ID = OTHERS;
-	}
-	printk("CHG_TYPE_judge  ASUS_ADAPTER_ID=%d\n",ASUS_ADAPTER_ID);
+                }
+
+    }
+
+    if(ASUS_ADAPTER_ID == 4||ASUS_ADAPTER_ID == 3) //Non-Asus-Charger
+        printk("OTHER_CHARGER\n");
+
+       else if(ASUS_ADAPTER_ID == 1||ASUS_ADAPTER_ID == 2)//Asus-Charger
+                printk("ASUS_CHARGER\n");
+
+               else if(ASUS_ADAPTER_ID == 3)
+                        printk("POWER_BANK");
+
 }
 
 void asus_adapter_adc_work(struct work_struct *work)
@@ -4359,24 +4339,8 @@ void asus_adapter_adc_work(struct work_struct *work)
 
 	}
 #endif
-	//determine current-setting value for DCP type AC:
-	switch (ASUS_ADAPTER_ID) {
-	case ASUS_750K:
-			usb_max_current = ICL_2000mA;
-		break;
-	case ASUS_200K:
-			usb_max_current = ICL_2000mA;
-		break;
-	case PB:
-			usb_max_current = ICL_2000mA;
-		break;
-	case OTHERS:
-			usb_max_current = ICL_2000mA;
-		break;
-	case ADC_NOT_READY:
-		usb_max_current = ICL_1000mA;
-		break;
-	}
+    	usb_max_current = ICL_3000mA;
+
 	rc = smblib_set_usb_suspend(smbchg_dev, 0);
 	if (rc < 0)
 		printk("%s: Couldn't set 1340_USBIN_SUSPEND_BIT 0\n", __func__);
@@ -4420,7 +4384,7 @@ void asus_adapter_adc_work(struct work_struct *work)
 	}
 #endif
 //Set current:
-	printk("%s: ASUS_ADAPTER_ID = %s, setting mA = 0x%x\n", __func__, asus_id[ASUS_ADAPTER_ID], usb_max_current);
+	printk("%s: setting mA = 0x%x\n", __func__, usb_max_current);
 
 	//Set current:
 	rc = smblib_masked_write(smbchg_dev, USBIN_CURRENT_LIMIT_CFG_REG,                //reg=1370     bit7-bit0=
@@ -4441,6 +4405,7 @@ void asus_insertion_initial_settings(struct smb_charger *chg)
 #ifndef CONFIG_MACH_X01BD
 /* Huaqin add for ZQL1650-71 before BC1.2 500mA before adapter id 1000mA by fangaijun at 2018/4/4 start */
 	u8 USBIN_cc;
+        flag_repeat = 0;
 /* Huaqin add for ZQL1650-71 before BC1.2 500mA before adapter id 1000mA by fangaijun at 2018/4/4 end */
 #endif
 /* Huaqin add for ZQL1650-1287 factory version remove before BC1.2 500mA before adapter id 1000mA by fangaijun at 2018/5/8 end */
